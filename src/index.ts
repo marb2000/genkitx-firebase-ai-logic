@@ -270,26 +270,21 @@ function toFirebaseAIRequest(request: ExtendedGenerateRequest): {
         continue;
       }
       
-      const content: any = {
-        role: message.role === 'model' ? 'model' : 'user',
-        parts: [] as any[]
-      };
-      
       for (const part of message.content) {
         if (part.text) {
-          content.parts.push({ text: part.text });
+          contents.push({ text: part.text });
         } else if (part.media) {
           if (part.media.url.startsWith('data:')) {
             const [mimeType, data] = part.media.url.split(',');
             const actualMimeType = mimeType.split(':')[1].split(';')[0];
-            content.parts.push({
+            contents.push({
               inlineData: {
                 mimeType: actualMimeType,
                 data: data
               }
             });
           } else if (part.media.url.startsWith('gs://')) {
-            content.parts.push({
+            contents.push({
               fileData: {
                 mimeType: part.media.contentType,
                 fileUri: part.media.url
@@ -297,14 +292,14 @@ function toFirebaseAIRequest(request: ExtendedGenerateRequest): {
             });
           }
         } else if (part.toolRequest) {
-          content.parts.push({
+          contents.push({
             functionCall: {
               name: part.toolRequest.name,
               args: part.toolRequest.input
             }
           });
         } else if (part.toolResponse) {
-          content.parts.push({
+          contents.push({
             functionResponse: {
               name: part.toolResponse.name,
               response: part.toolResponse.output
@@ -312,17 +307,12 @@ function toFirebaseAIRequest(request: ExtendedGenerateRequest): {
           });
         }
       }
-      
-      contents.push(content);
     }
   }
   
   // Check if request has content in a different structure
   if (contents.length === 0 && request.prompt) {
-    contents.push({
-      role: 'user',
-      parts: [{ text: request.prompt }]
-    });
+    contents.push({ text: request.prompt });
   }
   
   return { contents, systemInstruction };
@@ -360,13 +350,18 @@ function toGenkitResponse(response: any): GenerateResponseData {
         }
       }
       
+      let finishReason = candidate.finishReason?.toLowerCase() || 'other';
+      if (finishReason === 'max_tokens') {
+        finishReason = 'length';
+      }
+
       candidates.push({
         index: i,
         message: {
           role: 'model',
           content: parts
         },
-        finishReason: candidate.finishReason || 'stop',
+        finishReason: finishReason as any,
         custom: {
           safetyRatings: candidate.safetyRatings,
           citationMetadata: candidate.citationMetadata,
