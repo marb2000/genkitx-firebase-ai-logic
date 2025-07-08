@@ -1,0 +1,68 @@
+{
+  "name": "genkitx-firebase-ai-logic",
+  "version": "1.0.0",
+  "description": "Genkit plugin for Firebase AI Logic client SDK integration",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "test/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+   "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "npm run build && node dist/test/test-plugin.js",
+    "test:basic": "npm run build && node -e \"require('./dist/test/test-plugin.js').testBasicGeneration()\"",
+    "test:json": "npm run build && node -e \"require('./dist/test/test-plugin.js').testStructuredOutput()\"",
+    "test:functions": "npm run build && node -e \"require('./dist/test/test-plugin.js').testFunctionCalling()\"",
+    "test:multimodal": "npm run build && node -e \"require('./dist/test/test-plugin.js').testMultimodalInput()\"",
+    "test:safety": "npm run build && node -e \"require('./dist/test/test-plugin.js').testSafetySettings()\"",
+    "test:errors": "npm run build && node -e \"require('./dist/test/test-plugin.js').testErrorHandling()\"",
+    "test:watch": "nodemon --exec \"npm run test\" --watch src --ext ts",
+    "test:quick": "tsx test/test-plugin.ts",
+    "test:smoke": "node test/smoke-test.js",
+    "test:types": "tsc --noEmit test/type-test.ts",
+    "test:simple": "npm run build && node test/simple-test.js",
+    "check": "npm run test:smoke && npm run test:types && echo '✅ All checks passed!'",
+    "prepublishOnly": "npm run build && npm run check && npm test"
+  },
+  "keywords": [
+    "genkit-plugin",
+    "genkit-model", 
+    "firebase",
+    "firebase-ai-logic",
+    "gemini",
+    "ai",
+    "llm",
+    "generative-ai",
+    "google"
+  ],
+  "author":"Miguel Ramos",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marb2000/genkitx-firebase-ai-logic.git"
+  },
+  "peerDependencies": {
+    "firebase": "^11.10.0",
+    "genkit": "^1.14.0"
+  },
+  "dependencies": {
+    "@firebase/app": "^0.10.15",
+    "@firebase/ai": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "typescript": "^5.8.3",
+    "tsx": "^4.0.0",
+    "nodemon": "^3.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "type": "module"
+}
