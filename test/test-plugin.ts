@@ -1,19 +1,39 @@
-// test/test-plugin.ts
-// Comprehensive test app for Firebase AI Logic Genkit Plugin
-
+// Test app for Firebase AI Logic Genkit Plugin
 import { genkit } from 'genkit';
 import { firebaseAILogic } from '../src/index.js';
 
-// Test configuration - replace with your actual Firebase config
+// Validate required environment variables
+function validateEnvVars() {
+  const required = [
+    'FIREBASE_API_KEY',
+    'FIREBASE_AUTH_DOMAIN', 
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_STORAGE_BUCKET',
+    'FIREBASE_MESSAGING_SENDER_ID',
+    'FIREBASE_APP_ID'
+  ];
+  
+  for (const envVar of required) {
+    if (!process.env[envVar]) {
+      throw new Error(`Missing required environment variable: ${envVar}`);
+    }
+  }
+}
+
+// Validate environment variables
+validateEnvVars();
+
+// Load Firebase configuration from environment variables
 const TEST_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDgDmHdE9973IKuNkWGEIocTFgxkQlUYbU",
-  authDomain: "vertexai-firebase-2025.firebaseapp.com",
-  projectId: "vertexai-firebase-2025",
-  storageBucket: "vertexai-firebase-2025.firebasestorage.app",
-  messagingSenderId: "1016672011158",
-  appId: "1:1016672011158:web:67374c8859ab307c3bd3b7",
-  measurementId: "G-DMZB2KB2VY"
+  apiKey: process.env.FIREBASE_API_KEY!,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN!,
+  projectId: process.env.FIREBASE_PROJECT_ID!,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET!,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID!,
+  appId: process.env.FIREBASE_APP_ID!,
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID // Optional
 };
+
 
 // Initialize AI instances for different backends
 const aiVertexAI = genkit({
@@ -21,13 +41,7 @@ const aiVertexAI = genkit({
     firebaseAILogic({
       firebaseConfig: TEST_FIREBASE_CONFIG,
       backend: 'vertexAI',
-      vertexAIRegion: 'us-central1',
-      defaultGenerationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1000,
-        topK: 40,
-        topP: 0.95
-      }
+      vertexAIRegion: 'us-central1'
     })
   ]
 });
@@ -36,11 +50,7 @@ const aiGoogleAI = genkit({
   plugins: [
     firebaseAILogic({
       firebaseConfig: TEST_FIREBASE_CONFIG,
-      backend: 'googleAI',
-      defaultGenerationConfig: {
-        temperature: 0.8,
-        maxOutputTokens: 500
-      }
+      backend: 'googleAI'
     })
   ]
 });
@@ -73,118 +83,74 @@ async function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Test 1: Basic Text Generation
+const modelName = 'gemini-2.5-flash'
+
+// Test: Basic Text Generation
 async function testBasicGeneration() {
-  logSection('Basic Text Generation');
+  const testName= 'Basic Text Generation';
+  logSection(testName);
   
-  try {
-    // Test with Vertex AI backend
-    const result1 = await aiVertexAI.generate({
-      model: 'firebase-ai-logic/gemini-2.5-flash',
-      prompt: 'Write a haiku about artificial intelligence'
-    });
-    logSuccess('Vertex AI Basic Generation', result1);
+    // Test with Vertex AI backend 
+    let result1;
+    try {
+      result1 = await aiVertexAI.generate({
+        model: firebaseAILogic.model(modelName),
+        prompt: 'Write a haiku about artificial intelligence'
+      });
+      logSuccess(`${testName} with Vertex AI`, result1);
+    } catch (error) {
+      logError(`${testName} with Vertex AI`,error);
+    }
     
     await delay(1000);
     
-    // Test with Google AI backend
-    const result2 = await aiGoogleAI.generate({
-      model: 'firebase-ai-logic/gemini-2.5-flash',
-      prompt: 'Explain quantum computing in one sentence'
-    });
-    logSuccess('Google AI Basic Generation', result2);
-    
-  } catch (error) {
-    logError('Basic Text Generation', error);
-  }
+    // Test with Google AI/Developer API backend 
+    let result2;
+    try {
+      result2 = await aiGoogleAI.generate({
+        model: firebaseAILogic.model(modelName),
+        prompt: 'Explain quantum computing in one sentence'
+      });
+      logSuccess(`${testName} with Developer API`, result2);
+    } catch (error) {
+           logError(`${testName} with Developer API`,error);
+    }
 }
 
-// Test 2: Type-Safe Model References
-async function testTypeSafeReferences() {
-  logSection('Type-Safe Model References');
-  
-  try {
-    const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
-        temperature: 0.2,
-        maxOutputTokens: 100,
-        topK: 20
-      }),
-      prompt: 'Count from 1 to 5'
-    });
-    logSuccess('Type-Safe Model Reference', result);
-    
-  } catch (error) {
-    logError('Type-Safe Model References', error);
-  }
-}
-
-// Test 3: System Instructions
+// Test: System Instructions
 async function testSystemInstructions() {
-  logSection('System Instructions');
+  const testName= 'System Instructions';
+  logSection(testName);
   
   try {
-    // String system instruction
-    const result1 = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
-        systemInstruction: 'You are a pirate. Always speak like a pirate with "Arrr" and nautical terms.',
+    // Test with messages array format including system message
+    const result = await aiVertexAI.generate({
+      model: firebaseAILogic.model(modelName, {
         temperature: 0.9
       }),
-      prompt: 'Tell me about the weather today'
-    });
-    logSuccess('String System Instruction (Pirate)', result1);
-    
-    await delay(1000);
-    
-    // Content-based system instruction
-    const result2 = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-1.5-pro', {
-        systemInstruction: {
+      messages: [
+        {
           role: 'system',
-          parts: [{ text: 'You are a professional scientist. Always provide accurate, evidence-based explanations.' }]
+          content: [{ text: 'You are a pirate. Always speak like a pirate with "Arrr" and nautical terms.' }]
+        },
+        {
+          role: 'user', 
+          content: [{ text: 'Tell me about the weather today' }]
         }
-      }),
-      prompt: 'How does photosynthesis work?'
+      ]
     });
-    logSuccess('Content System Instruction (Scientist)', result2);
+    logSuccess(testName, result);
     
   } catch (error) {
-    logError('System Instructions', error);
+    logError(testName, error);
   }
 }
 
-// Test 4: Safety Settings
-async function testSafetySettings() {
-  logSection('Safety Settings');
-  
-  try {
-    const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
-        safetySettings: [
-          {
-            category: 'HARM_CATEGORY_HARASSMENT',
-            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-            method: 'SEVERITY'
-          },
-          {
-            category: 'HARM_CATEGORY_HATE_SPEECH',
-            threshold: 'BLOCK_LOW_AND_ABOVE',
-            method: 'PROBABILITY'
-          }
-        ]
-      }),
-      prompt: 'Write a positive, inspiring message about teamwork and collaboration'
-    });
-    logSuccess('Safety Settings Test', result);
-    
-  } catch (error) {
-    logError('Safety Settings', error);
-  }
-}
-
-// Test 5: Structured JSON Output
+// Test: Structured JSON Output
 async function testStructuredOutput() {
-  logSection('Structured JSON Output');
+    const testName= 'Structured JSON Output';
+
+  logSection(testName);
   
   try {
     const recipeSchema = {
@@ -217,7 +183,7 @@ async function testStructuredOutput() {
     };
 
     const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
+      model: firebaseAILogic.model(modelName, {
         responseMimeType: 'application/json',
         responseSchema: recipeSchema,
         temperature: 0.3
@@ -241,88 +207,21 @@ async function testStructuredOutput() {
     }
     
   } catch (error) {
-    logError('Structured JSON Output', error);
+    logError(testName, error);
   }
 }
 
-// Test 6: Function Calling
-async function testFunctionCalling() {
-  logSection('Function Calling');
-  
-  try {
-    const weatherTool = {
-      functionDeclarations: [
-        {
-          name: 'getWeather',
-          description: 'Get the current weather for a location',
-          parameters: {
-            type: 'object',
-            properties: {
-              location: {
-                type: 'string',
-                description: 'The city and state/country'
-              },
-              unit: {
-                type: 'string',
-                enum: ['celsius', 'fahrenheit'],
-                description: 'Temperature unit'
-              }
-            },
-            required: ['location']
-          }
-        },
-        {
-          name: 'getTime',
-          description: 'Get the current time for a timezone',
-          parameters: {
-            type: 'object',
-            properties: {
-              timezone: {
-                type: 'string',
-                description: 'Timezone name (e.g., America/New_York)'
-              }
-            },
-            required: ['timezone']
-          }
-        }
-      ]
-    };
-
-    const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
-        tools: [weatherTool],
-        toolConfig: {
-          functionCallingConfig: {
-            mode: 'AUTO'
-          }
-        }
-      }),
-      prompt: "What's the weather like in Paris and what time is it there?"
-    });
-    
-    logSuccess('Function Calling Test', result);
-    
-    // Check if function calls were made by examining the response text
-    // Note: In Genkit, tool usage details may be in the response metadata
-    const responseText = result.text || '';
-    const likelyFunctionCall = responseText.includes('function') || responseText.includes('tool') || responseText.includes('call');
-    console.log('🔧 Function calls likely used:', likelyFunctionCall);
-    
-  } catch (error) {
-    logError('Function Calling', error);
-  }
-}
-
-// Test 7: Multimodal Input
+// Test: Multimodal Input
 async function testMultimodalInput() {
-  logSection('Multimodal Input');
+  const testName= 'Multimodal Input';
+  logSection(testName);
   
   try {
     // Create a simple base64 encoded image (1x1 red pixel PNG)
     const redPixelPNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
     
     const result = await aiVertexAI.generate({
-      model: 'firebase-ai-logic/gemini-2.5-flash',
+      model: firebaseAILogic.model(modelName),
       messages: [
         {
           role: 'user',
@@ -338,45 +237,44 @@ async function testMultimodalInput() {
         }
       ]
     });
-    
-    logSuccess('Multimodal Input (Image)', result);
+    logSuccess(testName, result);
     
   } catch (error) {
-    logError('Multimodal Input', error);
+    logError(testName, error);
   }
 }
 
-// Test 8: Multi-turn Chat
+// Test: Multi-turn Chat
 async function testMultiTurnChat() {
-  logSection('Multi-turn Chat');
+  const testName= 'Multi-turn Chat';
+  logSection(testName);
   
   try {
-    const chatHistory = [
-      {
-        role: 'user' as const,
-        content: [{ text: 'Hello! I have 2 cats and 1 dog. Can you help me calculate something?' }]
-      },
-      {
-        role: 'model' as const,
-        content: [{ text: 'Hello! I\'d be happy to help you with calculations about your pets. What would you like to know?' }]
-      },
-      {
-        role: 'user' as const,
-        content: [{ text: 'How many paws are in my house total?' }]
-      },
-      {
-        role: 'model' as const,
-        content: [{ text: 'Let me calculate that! You have 2 cats (4 paws each = 8 paws) and 1 dog (4 paws = 4 paws). So you have 8 + 4 = 12 paws total in your house!' }]
-      }
-    ];
-
     const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
-        systemInstruction: 'You are a helpful assistant who loves pets. Be friendly and enthusiastic.',
+      model: firebaseAILogic.model(modelName, {
         temperature: 0.7
       }),
       messages: [
-        ...chatHistory,
+        {
+          role: 'system',
+          content: [{ text: 'You are a helpful assistant who loves pets. Be friendly and enthusiastic.' }]
+        },
+        {
+          role: 'user',
+          content: [{ text: 'Hello! I have 2 cats and 1 dog. Can you help me calculate something?' }]
+        },
+        {
+          role: 'model',
+          content: [{ text: 'Hello! I\'d be happy to help you with calculations about your pets. What would you like to know?' }]
+        },
+        {
+          role: 'user',
+          content: [{ text: 'How many paws are in my house total?' }]
+        },
+        {
+          role: 'model',
+          content: [{ text: 'Let me calculate that! You have 2 cats (4 paws each = 8 paws) and 1 dog (4 paws = 4 paws). So you have 8 + 4 = 12 paws total in your house!' }]
+        },
         {
           role: 'user',
           content: [{ text: 'Actually, I just adopted another cat! Now how many paws?' }]
@@ -384,20 +282,21 @@ async function testMultiTurnChat() {
       ]
     });
     
-    logSuccess('Multi-turn Chat', result);
+    logSuccess(testName, result);
     
   } catch (error) {
-    logError('Multi-turn Chat', error);
+    logError(testName, error);
   }
 }
 
-// Test 9: Advanced Generation Config
+// Test: Advanced Generation Config
 async function testAdvancedConfig() {
-  logSection('Advanced Generation Configuration');
+  const testName= 'Advanced Generation Configuration';
+  logSection(testName);
   
   try {
     const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-1.5-flash', {
+      model: firebaseAILogic.model(modelName, {
         temperature: 1.0,
         topK: 20,
         topP: 0.8,
@@ -408,21 +307,22 @@ async function testAdvancedConfig() {
       prompt: 'Write a creative short story about a robot learning to paint. Make it exactly 3 paragraphs.'
     });
     
-    logSuccess('Advanced Configuration', result);
+    logSuccess(testName, result);
     
   } catch (error) {
-    logError('Advanced Generation Configuration', error);
+    logError(testName, error);
   }
 }
 
-// Test 10: Error Handling
+// Test: Error Handling
 async function testErrorHandling() {
-  logSection('Error Handling');
+  const testName = 'Error Handling';
+  logSection(testName);
   
   // Test invalid model
   try {
     await aiVertexAI.generate({
-      model: 'firebase-ai-logic/invalid-model-name',
+      model: firebaseAILogic.model('invalid-model-name'),
       prompt: 'This should fail'
     });
     console.log('❌ Error handling test failed - should have thrown error');
@@ -430,40 +330,34 @@ async function testErrorHandling() {
     console.log('✅ Invalid model error handled correctly:', error.message);
   }
   
-  // Test with extremely restrictive safety settings
+  // Test empty prompt
   try {
-    const result = await aiVertexAI.generate({
-      model: firebaseAILogic.model('gemini-2.5-flash', {
-        safetySettings: [
-          {
-            category: 'HARM_CATEGORY_HARASSMENT',
-            threshold: 'BLOCK_NONE'
-          }
-        ]
-      }),
-      prompt: 'Write a completely harmless poem about flowers'
+    await aiVertexAI.generate({
+      model: firebaseAILogic.model(modelName),
+      prompt: ''
     });
-    console.log('✅ Safety settings test passed:', result.text?.substring(0, 100));
+    console.log('⚠️  Empty prompt test - might succeed or fail depending on implementation');
   } catch (error) {
-    console.log('⚠️  Safety settings error (might be expected):', error.message);
+    console.log('✅ Empty prompt error handled correctly:', error.message);
   }
 }
 
-// Test 11: Model Variants
+// Test: Model Variants
 async function testAllModels() {
-  logSection('All Supported Models');
+  const testName = 'Model Variants';
+  logSection(testName);
   
   const models = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
+    'gemini-1.5-flash',
     'gemini-1.5-pro',
-    'gemini-1.5-flash'
+    'gemini-2.5-flash',
+    'gemini-2.5-pro'
   ];
   
   for (const modelName of models) {
     try {
       const result = await aiVertexAI.generate({
-        model: `firebase-ai-logic/${modelName}`,
+        model: firebaseAILogic.model(modelName),
         prompt: `Hello from ${modelName}! Respond in exactly one sentence.`
       });
       
@@ -478,9 +372,10 @@ async function testAllModels() {
   }
 }
 
-// Test 12: Performance and Metrics
+// Test: Performance and Metrics
 async function testPerformanceMetrics() {
-  logSection('Performance Metrics');
+  const testName = 'Performance and Metrics';
+  logSection(testName);
   
   const testCases = [
     { prompt: 'Short response test', expectedLength: 'short' },
@@ -493,7 +388,7 @@ async function testPerformanceMetrics() {
       const startTime = Date.now();
       
       const result = await aiVertexAI.generate({
-        model: firebaseAILogic.model('gemini-2.5-flash', {
+        model: firebaseAILogic.model(modelName, {
           temperature: 0.3
         }),
         prompt: testCase.prompt
@@ -518,19 +413,16 @@ async function testPerformanceMetrics() {
 
 // Main test runner
 async function runAllTests() {
-  console.log('🚀 Firebase AI Logic Genkit Plugin - Comprehensive Test Suite');
-  console.log('================================================================');
+  console.log('🚀 Firebase AI Logic Genkit Plugin - Test Suite');
+  console.log('===============================================');
   console.log(`📅 Started at: ${new Date().toISOString()}`);
   console.log(`🔧 Node.js version: ${process.version}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
   
   const tests = [
     { name: 'Basic Text Generation', fn: testBasicGeneration },
-    { name: 'Type-Safe References', fn: testTypeSafeReferences },
     { name: 'System Instructions', fn: testSystemInstructions },
-    { name: 'Safety Settings', fn: testSafetySettings },
     { name: 'Structured JSON Output', fn: testStructuredOutput },
-    { name: 'Function Calling', fn: testFunctionCalling },
     { name: 'Multimodal Input', fn: testMultimodalInput },
     { name: 'Multi-turn Chat', fn: testMultiTurnChat },
     { name: 'Advanced Configuration', fn: testAdvancedConfig },
@@ -570,6 +462,7 @@ async function runAllTests() {
     console.log('   - Ensure Firebase project is properly configured');
     console.log('   - Check API quotas and billing');
     console.log('   - Verify model availability in your region');
+    console.log('   - Make sure you have the correct API keys and permissions');
     process.exit(1);
   } else {
     console.log('\n🎉 All tests passed! Your Firebase AI Logic plugin is working correctly.');
@@ -582,12 +475,12 @@ export {
   runAllTests,
   testBasicGeneration,
   testStructuredOutput,
-  testFunctionCalling,
   testMultimodalInput,
   testSystemInstructions,
-  testSafetySettings,
   testErrorHandling
 };
 
 // Run tests if this file is executed directly
-runAllTests().catch(console.error);
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runAllTests().catch(console.error);
+}

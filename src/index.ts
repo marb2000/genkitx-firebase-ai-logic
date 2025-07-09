@@ -1,6 +1,3 @@
-// Firebase AI Logic Genkit Plugin Implementation
-// File: src/index.ts
-
 import { 
   initializeApp, 
   FirebaseApp, 
@@ -9,18 +6,8 @@ import {
 import { 
   getAI, 
   getGenerativeModel,
-  getImagenModel,
   GoogleAIBackend,
-  VertexAIBackend,
-  Schema,
-  HarmCategory,
-  HarmBlockThreshold,
-  HarmBlockMethod,
-  FunctionCallingMode,
-  ImagenAspectRatio,
-  ImagenSafetyFilterLevel,
-  ImagenPersonFilterLevel,
-  ImagenImageFormat
+  VertexAIBackend
 } from 'firebase/ai';
 import {
   Genkit,
@@ -36,20 +23,12 @@ import {
   GenerateRequest,
   GenerateResponseData,
   CandidateData,
-  MessageData,
   Part,
   modelRef
 } from 'genkit/model';
 
-// Type augmentation for Firebase AI Logic specific properties
-interface ExtendedGenerateRequest extends GenerateRequest {
-  prompt?: string;
-  input?: string;
-}
-
 // Plugin Options Interface
 export interface FirebaseAILogicOptions {
-  // Firebase configuration
   firebaseConfig?: {
     apiKey: string;
     authDomain: string;
@@ -60,39 +39,12 @@ export interface FirebaseAILogicOptions {
     measurementId?: string;
   };
   
-  // Backend provider - either Gemini Developer API or Vertex AI
   backend?: 'googleAI' | 'vertexAI';
-  
-  // Vertex AI region (required for Vertex AI backend)
   vertexAIRegion?: string;
-  
-  // Optional Firebase app instance if already initialized
   firebaseApp?: FirebaseApp;
-  
-  // Default model to use
-  defaultModel?: string;
-  
-  // Generation config defaults
-  defaultGenerationConfig?: {
-    temperature?: number;
-    topK?: number;
-    topP?: number;
-    maxOutputTokens?: number;
-    stopSequences?: string[];
-    candidateCount?: number;
-    responseMimeType?: string;
-    responseSchema?: any;
-  };
-  
-  // Safety settings defaults
-  defaultSafetySettings?: Array<{
-    category: string;
-    threshold: string;
-    method?: string;
-  }>;
 }
 
-// Configuration schema for Firebase AI Logic models
+// Configuration schema
 const FirebaseAILogicConfigSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   topK: z.number().positive().optional(),
@@ -102,118 +54,32 @@ const FirebaseAILogicConfigSchema = z.object({
   candidateCount: z.number().positive().max(8).optional(),
   responseMimeType: z.string().optional(),
   responseSchema: z.any().optional(),
-  safetySettings: z.array(z.object({
-    category: z.string(),
-    threshold: z.string(),
-    method: z.string().optional()
-  })).optional(),
   systemInstruction: z.union([z.string(), z.object({
     role: z.literal('system'),
     parts: z.array(z.object({
       text: z.string()
     }))
-  })]).optional(),
-  tools: z.array(z.any()).optional(),
-  toolConfig: z.object({
-    functionCallingConfig: z.object({
-      mode: z.string()
-    }).optional()
-  }).optional()
+  })]).optional()
 });
 
 export type FirebaseAILogicConfig = z.infer<typeof FirebaseAILogicConfigSchema>;
 
-// Define supported model names as a union type
-export type SupportedModelName = 'gemini-2.5-flash' | 'gemini-2.0-flash' | 'gemini-1.5-pro' | 'gemini-1.5-flash';
+// Global storage for Firebase AI instances
+let globalFirebaseAI: any = null;
+let globalOptions: FirebaseAILogicOptions = {};
 
-// Supported models mapping
-const SUPPORTED_MODELS: Record<SupportedModelName, {
-  name: string;
-  label: string;
-  supports: {
-    multiturn: boolean;
-    media: boolean;
-    tools: boolean;
-    systemRole: boolean;
-    output: string[];
-  };
-}> = {
-  'gemini-2.5-flash': {
-    name: 'firebase-ai-logic/gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
-    supports: {
-      multiturn: true,
-      media: true,
-      tools: true,
-      systemRole: true,
-      output: ['text', 'json']
-    }
-  },
-  'gemini-2.0-flash': {
-    name: 'firebase-ai-logic/gemini-2.0-flash',
-    label: 'Gemini 2.0 Flash',
-    supports: {
-      multiturn: true,
-      media: true,
-      tools: true,
-      systemRole: true,
-      output: ['text', 'json']
-    }
-  },
-  'gemini-1.5-pro': {
-    name: 'firebase-ai-logic/gemini-1.5-pro',
-    label: 'Gemini 1.5 Pro',
-    supports: {
-      multiturn: true,
-      media: true,
-      tools: true,
-      systemRole: true,
-      output: ['text', 'json']
-    }
-  },
-  'gemini-1.5-flash': {
-    name: 'firebase-ai-logic/gemini-1.5-flash',
-    label: 'Gemini 1.5 Flash',
-    supports: {
-      multiturn: true,
-      media: true,
-      tools: true,
-      systemRole: true,
-      output: ['text', 'json']
-    }
-  }
-};
-
-// Helper function to check if a model name is supported
-function isSupportedModel(modelName: string): modelName is SupportedModelName {
-  return modelName in SUPPORTED_MODELS;
-}
-
-// Helper function to initialize Firebase app
+// Initialize Firebase app
 function initializeFirebaseApp(options: FirebaseAILogicOptions): FirebaseApp {
   if (options.firebaseApp) {
     return options.firebaseApp;
   }
   
   if (options.firebaseConfig) {
-    try {
-      // Check if app already exists
-      const existingApps = getApps();
-      if (existingApps.length > 0) {
-        return existingApps[0];
-      }
-      return initializeApp(options.firebaseConfig);
-    } catch (error) {
-      // For testing purposes, if Firebase initialization fails with mock config,
-      // we'll still return a mock app structure to allow plugin creation
-      if (options.firebaseConfig.projectId === 'test-project') {
-        return {
-          name: '[DEFAULT]',
-          options: options.firebaseConfig
-        } as FirebaseApp;
-      }
-      throw error;
+    const existingApps = getApps();
+    if (existingApps.length > 0) {
+      return existingApps[0];
     }
+    return initializeApp(options.firebaseConfig);
   }
   
   throw new GenkitError({
@@ -223,7 +89,7 @@ function initializeFirebaseApp(options: FirebaseAILogicOptions): FirebaseApp {
   });
 }
 
-// Helper function to get AI backend
+// Get AI backend
 function getAIBackend(backend: 'googleAI' | 'vertexAI', region?: string) {
   switch (backend) {
     case 'googleAI':
@@ -239,365 +105,249 @@ function getAIBackend(backend: 'googleAI' | 'vertexAI', region?: string) {
   }
 }
 
-// Helper function to handle errors safely
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === 'string') {
-    return error;
-  }
-  if (error && typeof error === 'object' && 'message' in error) {
-    return String((error as any).message);
-  }
-  return 'Unknown error occurred';
-}
-
-// Transform Genkit request to Firebase AI Logic format
-function toFirebaseAIRequest(request: ExtendedGenerateRequest): { 
-  contents: any[], 
-  systemInstruction: string | null 
-} {
-  const contents: any[] = [];
-  
-  // Handle system instruction separately
-  let systemInstruction: string | null = null;
-  
+// Convert Genkit request to Firebase AI format
+function toFirebaseAIRequest(request: GenerateRequest): string | any[] {
+  // Handle messages array (primary way in Genkit)
   if (request.messages) {
-    for (const message of request.messages) {
-      if (message.role === 'system') {
-        systemInstruction = message.content[0]?.text || '';
-        continue;
-      }
+    const messages = request.messages as any[];
+    if (Array.isArray(messages) && messages.length > 0) {
+      // For Firebase AI generateContent, we should only send the last user message
+      // Firebase AI's generateContent doesn't handle conversation history directly
+      // (that's what startChat() is for)
       
-      for (const part of message.content) {
-        if (part.text) {
-          contents.push({ text: part.text });
-        } else if (part.media) {
-          if (part.media.url.startsWith('data:')) {
-            const [mimeType, data] = part.media.url.split(',');
-            const actualMimeType = mimeType.split(':')[1].split(';')[0];
-            contents.push({
-              inlineData: {
-                mimeType: actualMimeType,
-                data: data
-              }
-            });
-          } else if (part.media.url.startsWith('gs://')) {
-            contents.push({
-              fileData: {
-                mimeType: part.media.contentType,
-                fileUri: part.media.url
-              }
-            });
-          }
-        } else if (part.toolRequest) {
-          contents.push({
-            functionCall: {
-              name: part.toolRequest.name,
-              args: part.toolRequest.input
-            }
-          });
-        } else if (part.toolResponse) {
-          contents.push({
-            functionResponse: {
-              name: part.toolResponse.name,
-              response: part.toolResponse.output
-            }
-          });
-        }
-      }
-    }
-  }
-  
-  // Check if request has content in a different structure
-  if (contents.length === 0 && request.prompt) {
-    contents.push({ text: request.prompt });
-  }
-  
-  return { contents, systemInstruction };
-}
-
-// Transform Firebase AI Logic response to Genkit format
-function toGenkitResponse(response: any): GenerateResponseData {
-  const candidates: CandidateData[] = [];
-  
-  // Handle different response structures
-  if (response.candidates && Array.isArray(response.candidates)) {
-    for (let i = 0; i < response.candidates.length; i++) {
-      const candidate = response.candidates[i];
-      const parts: Part[] = [];
+      // Find the last user message
+      const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user');
       
-      if (candidate.content?.parts) {
-        for (const part of candidate.content.parts) {
+      if (lastUserMessage && Array.isArray(lastUserMessage.content)) {
+        const parts: any[] = [];
+        
+        for (const part of lastUserMessage.content) {
           if (part.text) {
             parts.push({ text: part.text });
-          } else if (part.functionCall) {
-            parts.push({
-              toolRequest: {
-                name: part.functionCall.name,
-                input: part.functionCall.args
-              }
-            });
-          } else if (part.functionResponse) {
-            parts.push({
-              toolResponse: {
-                name: part.functionResponse.name,
-                output: part.functionResponse.response
-              }
-            });
+          } else if (part.media) {
+            if (part.media.url.startsWith('data:')) {
+              const [mimeType, data] = part.media.url.split(',');
+              const actualMimeType = mimeType.split(':')[1].split(';')[0];
+              parts.push({
+                inlineData: {
+                  mimeType: actualMimeType,
+                  data: data
+                }
+              });
+            } else if (part.media.url.startsWith('gs://')) {
+              parts.push({
+                fileData: {
+                  mimeType: part.media.contentType,
+                  fileUri: part.media.url
+                }
+              });
+            }
           }
+        }
+        
+        // For single text part, return as simple string
+        if (parts.length === 1 && parts[0].text) {
+          return parts[0].text;
+        }
+        
+        // For multiple parts or media, return as array
+        if (parts.length > 0) {
+          return parts;
         }
       }
       
-      let finishReason = candidate.finishReason?.toLowerCase() || 'other';
-      if (finishReason === 'max_tokens') {
-        finishReason = 'length';
+      // Fallback - try to extract text from last message
+      if (lastUserMessage?.content?.[0]?.text) {
+        return lastUserMessage.content[0].text;
       }
-
-      candidates.push({
-        index: i,
-        message: {
-          role: 'model',
-          content: parts
-        },
-        finishReason: finishReason as any,
-        custom: {
-          safetyRatings: candidate.safetyRatings,
-          citationMetadata: candidate.citationMetadata,
-          groundingMetadata: candidate.groundingMetadata
-        }
-      });
     }
-  } else {
-    // Fallback for simple text response or different response structure
+  }
+  
+  // If we get here, we couldn't extract any valid content
+  throw new GenkitError({
+    source: 'firebase-ai-logic-plugin',
+    status: 'INVALID_ARGUMENT',
+    message: 'Unable to extract valid content from request. Please provide messages with text content in the correct format.'
+  });
+}
+
+// Extract system instruction from request
+function extractSystemInstruction(request: GenerateRequest): string | undefined {
+  if (request.config?.systemInstruction) {
+    if (typeof request.config.systemInstruction === 'string') {
+      return request.config.systemInstruction;
+    }
+    if (typeof request.config.systemInstruction === 'object' && 
+        request.config.systemInstruction.parts?.[0]?.text) {
+      return request.config.systemInstruction.parts[0].text;
+    }
+  }
+  
+  // Check messages for system role
+  if (request.messages && Array.isArray(request.messages)) {
+    for (const message of request.messages) {
+      if (message.role === 'system' && message.content?.[0]?.text) {
+        return message.content[0].text;
+      }
+    }
+  }
+  
+  return undefined;
+}
+
+// Convert Firebase AI response to Genkit format
+function toGenkitResponse(response: any): GenerateResponseData {
+  try {
+    // Extract text using Firebase AI's .text() method
     let text = '';
-    
-    if (typeof response.text === 'function') {
+    if (response && typeof response.response?.text === 'function') {
+      text = response.response.text();
+    } else if (typeof response.text === 'function') {
       text = response.text();
-    } else if (typeof response.text === 'string') {
-      text = response.text;
+    } else if (response.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      text = response.response.candidates[0].content.parts[0].text;
     } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
       text = response.candidates[0].content.parts[0].text;
     }
     
-    if (text) {
-      candidates.push({
+    const candidates: CandidateData[] = [{
+      index: 0,
+      message: {
+        role: 'model',
+        content: [{ text }]
+      },
+      finishReason: 'stop',
+      custom: {
+        safetyRatings: response.response?.candidates?.[0]?.safetyRatings,
+        citationMetadata: response.response?.candidates?.[0]?.citationMetadata
+      }
+    }];
+    
+    // Extract usage metadata
+    const usageMetadata = response.response?.usageMetadata || {};
+    
+    return {
+      candidates,
+      usage: {
+        inputTokens: usageMetadata.promptTokenCount || 0,
+        outputTokens: usageMetadata.candidatesTokenCount || 0,
+        totalTokens: usageMetadata.totalTokenCount || 0
+      },
+      custom: {
+        promptFeedback: response.response?.promptFeedback
+      }
+    };
+  } catch (error) {
+    return {
+      candidates: [{
         index: 0,
         message: {
           role: 'model',
-          content: [{ text }]
+          content: [{ text: `Error processing response: ${error instanceof Error ? error.message : 'Unknown error'}` }]
         },
-        finishReason: 'stop',
-        custom: {}
-      });
-    }
+        finishReason: 'other',
+        custom: { error: error instanceof Error ? error.message : 'Unknown error' }
+      }],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0
+      },
+      custom: {}
+    };
   }
-  
-  return {
-    candidates,
-    usage: {
-      inputTokens: response.usageMetadata?.promptTokenCount || 0,
-      outputTokens: response.usageMetadata?.candidatesTokenCount || 0,
-      totalTokens: response.usageMetadata?.totalTokenCount || 0
-    },
-    custom: {
-      promptFeedback: response.promptFeedback
-    }
-  };
 }
 
-// Create Firebase AI Logic model function
+// Create Firebase AI Logic model
 function createFirebaseAILogicModel(
   ai: Genkit,
   modelName: string,
   firebaseAI: any,
   options: FirebaseAILogicOptions
 ) {
-  if (!isSupportedModel(modelName)) {
-    throw new GenkitError({
-      source: 'firebase-ai-logic-plugin',
-      status: 'INVALID_ARGUMENT',
-      message: `Unsupported model: ${modelName}`
-    });
-  }
-
-  const modelInfo = SUPPORTED_MODELS[modelName];
-
   return ai.defineModel(
     {
-      name: modelInfo.name,
-      label: modelInfo.label,
-      supports: modelInfo.supports,
+      name: `firebase-ai-logic/${modelName}`, // Add prefix here for internal Genkit registration
+      label: `Firebase AI Logic ${modelName}`,
+      supports: {
+        multiturn: true,
+        media: true,
+        tools: false,
+        systemRole: true,
+        output: ['text', 'json']
+      },
       configSchema: FirebaseAILogicConfigSchema
     },
-    async (request: ExtendedGenerateRequest) => {
+    async (request: GenerateRequest) => {
       try {
         // Build model configuration
         const modelConfig: any = {
-          model: modelName
+          model: modelName // Use the original model name for Firebase AI, not the prefixed version
         };
         
-        // Build generation config
-        const generationConfig: any = {};
-        
-        if (request.config?.temperature !== undefined) {
-          generationConfig.temperature = request.config.temperature;
-        } else if (options.defaultGenerationConfig?.temperature !== undefined) {
-          generationConfig.temperature = options.defaultGenerationConfig.temperature;
+        // Add generation config
+        if (request.config) {
+          const generationConfig: any = {};
+          
+          if (request.config.temperature !== undefined) {
+            generationConfig.temperature = request.config.temperature;
+          }
+          if (request.config.topK !== undefined) {
+            generationConfig.topK = request.config.topK;
+          }
+          if (request.config.topP !== undefined) {
+            generationConfig.topP = request.config.topP;
+          }
+          if (request.config.maxOutputTokens !== undefined) {
+            generationConfig.maxOutputTokens = request.config.maxOutputTokens;
+          }
+          if (request.config.stopSequences) {
+            generationConfig.stopSequences = request.config.stopSequences;
+          }
+          if (request.config.candidateCount) {
+            generationConfig.candidateCount = request.config.candidateCount;
+          }
+          if (request.config.responseMimeType) {
+            generationConfig.responseMimeType = request.config.responseMimeType;
+          }
+          if (request.config.responseSchema) {
+            generationConfig.responseSchema = request.config.responseSchema;
+          }
+          
+          if (Object.keys(generationConfig).length > 0) {
+            modelConfig.generationConfig = generationConfig;
+          }
         }
         
-        if (request.config?.topK !== undefined) {
-          generationConfig.topK = request.config.topK;
-        } else if (options.defaultGenerationConfig?.topK !== undefined) {
-          generationConfig.topK = options.defaultGenerationConfig.topK;
+        // Add system instruction
+        const systemInstruction = extractSystemInstruction(request);
+        if (systemInstruction) {
+          modelConfig.systemInstruction = systemInstruction;
         }
         
-        if (request.config?.topP !== undefined) {
-          generationConfig.topP = request.config.topP;
-        } else if (options.defaultGenerationConfig?.topP !== undefined) {
-          generationConfig.topP = options.defaultGenerationConfig.topP;
-        }
-        
-        if (request.config?.maxOutputTokens !== undefined) {
-          generationConfig.maxOutputTokens = request.config.maxOutputTokens;
-        } else if (options.defaultGenerationConfig?.maxOutputTokens !== undefined) {
-          generationConfig.maxOutputTokens = options.defaultGenerationConfig.maxOutputTokens;
-        }
-        
-        if (request.config?.stopSequences) {
-          generationConfig.stopSequences = request.config.stopSequences;
-        }
-        
-        if (request.config?.candidateCount) {
-          generationConfig.candidateCount = request.config.candidateCount;
-        }
-        
-        if (request.config?.responseMimeType) {
-          generationConfig.responseMimeType = request.config.responseMimeType;
-        }
-        
-        if (request.config?.responseSchema) {
-          generationConfig.responseSchema = request.config.responseSchema;
-        }
-        
-        // Add generation config if not empty
-        if (Object.keys(generationConfig).length > 0) {
-          modelConfig.generationConfig = generationConfig;
-        }
-        
-        // Handle system instruction
-        if (request.config?.systemInstruction) {
-          modelConfig.systemInstruction = request.config.systemInstruction;
-        }
-        
-        // Handle safety settings
-        if (request.config?.safetySettings || options.defaultSafetySettings) {
-          modelConfig.safetySettings = request.config?.safetySettings || options.defaultSafetySettings;
-        }
-        
-        // Handle tools/functions
-        if (request.config?.tools) {
-          modelConfig.tools = request.config.tools;
-        }
-        
-        if (request.config?.toolConfig) {
-          modelConfig.toolConfig = request.config.toolConfig;
-        }
-
-        // Get the Firebase AI Logic model
+        // Get the Firebase AI model
         const model = getGenerativeModel(firebaseAI, modelConfig);
-
-        // Transform request content
-        const { contents, systemInstruction } = toFirebaseAIRequest(request);
         
-        // If no contents and we have a simple input, create a basic request
-        if (contents.length === 0) {
-          // Try to get input from request in different ways
-          const input = request.input || request.prompt || '';
-          if (input && typeof input === 'string') {
-            contents.push({
-              role: 'user',
-              parts: [{ text: input }]
-            });
-          }
-        }
+        // Convert request to Firebase AI format
+        const content = toFirebaseAIRequest(request);
         
-        // Update model config with system instruction if needed
-        if (systemInstruction && !modelConfig.systemInstruction) {
-          const updatedModelConfig = { ...modelConfig, systemInstruction };
-          const updatedModel = getGenerativeModel(firebaseAI, updatedModelConfig);
-          
-          let response;
-          try {
-            response = await updatedModel.generateContent(contents);
-          } catch (error: unknown) {
-            throw new GenkitError({
-              source: 'firebase-ai-logic-plugin',
-              status: 'INTERNAL',
-              message: `Firebase AI Logic generation failed: ${getErrorMessage(error)}`
-            });
-          }
-          
-          // Handle response structure - check if response has a response property
-          let finalResponse = response;
-          if (response && typeof response === 'object' && 'response' in response) {
-            finalResponse = (response as any).response;
-          }
-          
-          return toGenkitResponse(finalResponse);
-        }
-
-        // Generate content
-        let response;
-        try {
-          response = await model.generateContent(contents);
-        } catch (error: unknown) {
-          // Handle Firebase AI Logic specific errors
-          const errorMessage = getErrorMessage(error);
-          const errorObj = error as any;
-          
-          if (errorObj?.code === 'invalid-argument') {
-            throw new GenkitError({
-              source: 'firebase-ai-logic-plugin',
-              status: 'INVALID_ARGUMENT',
-              message: `Invalid request: ${errorMessage}`
-            });
-          } else if (errorObj?.code === 'permission-denied') {
-            throw new GenkitError({
-              source: 'firebase-ai-logic-plugin',
-              status: 'PERMISSION_DENIED',
-              message: `Permission denied: ${errorMessage}`
-            });
-          } else if (errorObj?.code === 'quota-exceeded' || errorObj?.code === 'resource-exhausted') {
-            throw new GenkitError({
-              source: 'firebase-ai-logic-plugin',
-              status: 'RESOURCE_EXHAUSTED',
-              message: `Quota exceeded: ${errorMessage}`
-            });
-          } else {
-            throw new GenkitError({
-              source: 'firebase-ai-logic-plugin',
-              status: 'INTERNAL',
-              message: `Firebase AI Logic generation failed: ${errorMessage}`
-            });
-          }
-        }
-
-        // Handle both streaming and non-streaming responses
-        let finalResponse = response;
-        if (response && typeof response === 'object' && 'response' in response) {
-          finalResponse = (response as any).response;
-        }
-
-        // Transform response back to Genkit format
-        return toGenkitResponse(finalResponse);
-
+        console.log(`Generating content with model: ${modelName}`, { 
+          modelConfig, 
+          content: typeof content === 'string' ? content : JSON.stringify(content, null, 2)
+        });
+        
+        // Generate content - Firebase AI generateContent expects the content directly
+        const response = await model.generateContent(content);
+        
+        return toGenkitResponse(response);
+        
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Firebase AI Logic generation failed for model ${modelName}:`, error);
         throw new GenkitError({
           source: 'firebase-ai-logic-plugin',
           status: 'INTERNAL',
-          message: `Firebase AI Logic generation failed: ${getErrorMessage(error)}`
+          message: `Firebase AI Logic generation failed: ${errorMessage}`
         });
       }
     }
@@ -608,8 +358,6 @@ function createFirebaseAILogicModel(
 function createFirebaseAILogicPlugin(options: FirebaseAILogicOptions = {}): GenkitPlugin {
   return genkitPlugin(
     'firebase-ai-logic',
-    
-    // Initializer function (required)
     async (ai: Genkit) => {
       try {
         // Initialize Firebase app
@@ -619,77 +367,63 @@ function createFirebaseAILogicPlugin(options: FirebaseAILogicOptions = {}): Genk
         const backend = options.backend || 'googleAI';
         const aiBackend = getAIBackend(backend, options.vertexAIRegion);
         
-        // Initialize Firebase AI Logic
+        // Initialize Firebase AI
         const firebaseAI = getAI(firebaseApp, { backend: aiBackend });
-
-        // Register all supported models initially
-        for (const modelName of Object.keys(SUPPORTED_MODELS) as SupportedModelName[]) {
-          createFirebaseAILogicModel(ai, modelName, firebaseAI, options);
-        }
+        
+        // Store globally for resolver to use
+        globalFirebaseAI = firebaseAI;
+        globalOptions = options;
         
         console.log(`Firebase AI Logic plugin initialized with ${backend} backend`);
+        
       } catch (error) {
-        // For testing purposes, if initialization fails, still register models
-        // but they will fail at runtime with proper error messages
-        if (options.firebaseConfig?.projectId === 'test-project') {
-          console.log('Firebase AI Logic plugin initialized in test mode');
-          
-          // Register models with minimal functionality for testing
-          for (const modelName of Object.keys(SUPPORTED_MODELS) as SupportedModelName[]) {
-            const modelInfo = SUPPORTED_MODELS[modelName];
-            ai.defineModel(
-              {
-                name: modelInfo.name,
-                label: modelInfo.label,
-                supports: modelInfo.supports,
-                configSchema: FirebaseAILogicConfigSchema
-              },
-              async (request: ExtendedGenerateRequest) => {
-                throw new GenkitError({
-                  source: 'firebase-ai-logic-plugin',
-                  status: 'FAILED_PRECONDITION',
-                  message: 'Plugin is in test mode - provide valid Firebase configuration for actual usage'
-                });
-              }
-            );
-          }
-        } else {
-          throw error;
-        }
+        throw new GenkitError({
+          source: 'firebase-ai-logic-plugin',
+          status: 'FAILED_PRECONDITION',
+          message: `Failed to initialize Firebase AI Logic plugin: ${error instanceof Error ? error.message : 'Unknown error'}`
+        });
       }
     },
-    
-    // Resolver function for dynamic model loading (optional)
+    // Plugin resolver for dynamic model loading
     async (ai: Genkit, action: string, name: string) => {
-      if (action === 'model' && name.startsWith('firebase-ai-logic/')) {
-        // Extract model name from action name
-        const modelName = name.replace('firebase-ai-logic/', '');
-        
+      if (action === 'model') {
         try {
-          // Initialize Firebase app for dynamic model loading
-          const firebaseApp = initializeFirebaseApp(options);
-          const backend = options.backend || 'googleAI';
-          const aiBackend = getAIBackend(backend, options.vertexAIRegion);
-          const firebaseAI = getAI(firebaseApp, { backend: aiBackend });
+          console.log(`Loading model dynamically: ${name}`);
           
-          // Create the model dynamically
-          createFirebaseAILogicModel(ai, modelName, firebaseAI, options);
+          // Use global Firebase AI instance if available, otherwise initialize
+          let firebaseAI = globalFirebaseAI;
+          let opts = globalOptions;
+          
+          if (!firebaseAI) {
+            const firebaseApp = initializeFirebaseApp(options);
+            const backend = options.backend || 'googleAI';
+            const aiBackend = getAIBackend(backend, options.vertexAIRegion);
+            firebaseAI = getAI(firebaseApp, { backend: aiBackend });
+            opts = options;
+          }
+          
+          // Extract the actual model name (remove firebase-ai-logic prefix if present)
+          const actualModelName = name.startsWith('firebase-ai-logic/') 
+            ? name.replace('firebase-ai-logic/', '') 
+            : name;
+          
+          // Create and register the model with the extracted name
+          createFirebaseAILogicModel(ai, actualModelName, firebaseAI, opts);
+          console.log(`Model ${name} loaded successfully with actual name: ${actualModelName}`);
+          
         } catch (error) {
-          console.warn(`Failed to dynamically load model ${modelName}:`, error);
+          console.error(`Failed to dynamically load model ${name}:`, error);
+          throw error;
         }
       }
     }
   );
 }
 
-
 // Type-safe plugin interface
 export interface FirebaseAILogicPlugin {
   (options?: FirebaseAILogicOptions): GenkitPlugin;
-  model(
-    name: string,
-    config?: FirebaseAILogicConfig
-  ): ModelReference<typeof FirebaseAILogicConfigSchema>;
+  model(name: string, config?: FirebaseAILogicConfig): ModelReference<typeof FirebaseAILogicConfigSchema>;
 }
 
 // Create the plugin with attached model method
@@ -698,11 +432,10 @@ const firebaseAILogic = Object.assign(
   {
     model: (name: string, config?: FirebaseAILogicConfig) =>
       modelRef({
-        name: `firebase-ai-logic/${name}`,
+        name: `firebase-ai-logic/${name}`, // Add prefix for the model reference
         configSchema: FirebaseAILogicConfigSchema,
         config
-      }),
-    pluginName: 'firebase-ai-logic' 
+      })
   }
 );
 
